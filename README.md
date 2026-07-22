@@ -1,6 +1,8 @@
 PO Stall Agent
 ================
 
+[![CI](https://github.com/Shraddha0605/po-stall-agent/actions/workflows/daily-run.yml/badge.svg)](https://github.com/Shraddha0605/po-stall-agent/actions/workflows/daily-run.yml) [![Release](https://img.shields.io/github/v/release/Shraddha0605/po-stall-agent?label=release&sort=semver)](https://github.com/Shraddha0605/po-stall-agent/releases)
+
 What it does
 ------------
 - Reads each configured Global Sourcing Manager's (GSM) Gmail mailbox, detects stalled POs, and produces a daily digest per GSM in Slack plus draft reply emails in that GSM's Gmail Drafts. A human reviews and sends everything.
