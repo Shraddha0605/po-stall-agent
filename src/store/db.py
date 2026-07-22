@@ -1,9 +1,9 @@
 import csv
 import json
-import os
-import sqlite3
+from datetime import datetime
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
+import sqlite3
 
 
 class Store:
@@ -87,17 +87,20 @@ class Store:
         )
         self.conn.commit()
 
-    def get_checkpoint(self, gsm_id: str) -> Optional[str]:
+    def get_checkpoint(self, gsm_id: str) -> Optional[Dict[str, str]]:
         row = self.conn.execute(
-            "SELECT last_message_id FROM checkpoints WHERE gsm_id = ?", (gsm_id,)
+            "SELECT last_message_id, updated_at FROM checkpoints WHERE gsm_id = ?", (gsm_id,)
         ).fetchone()
-        return row["last_message_id"] if row else None
+        if not row:
+            return None
+        return {"last_message_id": row["last_message_id"], "updated_at": row["updated_at"]}
 
     def set_checkpoint(self, gsm_id: str, last_message_id: str):
+        updated_at = datetime.utcnow().isoformat() + "Z"
         self.conn.execute(
-            "INSERT INTO checkpoints(gsm_id, last_message_id, updated_at) VALUES(?, ?, datetime('now')) "
-            "ON CONFLICT(gsm_id) DO UPDATE SET last_message_id = excluded.last_message_id, updated_at = datetime('now')",
-            (gsm_id, last_message_id),
+            "INSERT INTO checkpoints(gsm_id, last_message_id, updated_at) VALUES(?, ?, ?) "
+            "ON CONFLICT(gsm_id) DO UPDATE SET last_message_id = excluded.last_message_id, updated_at = excluded.updated_at",
+            (gsm_id, last_message_id, updated_at),
         )
         self.conn.commit()
 
@@ -168,6 +171,15 @@ class Store:
             (gsm_id, message_id, po_ref, draft_id, run_key),
         )
         self.conn.commit()
+
+    def message_seen(self, gsm_id: str, message_id: str) -> bool:
+        row = self.conn.execute(
+            "SELECT 1 FROM state_rows WHERE gsm_id=? AND source_message_id=? UNION "
+            "SELECT 1 FROM review_items WHERE gsm_id=? AND message_id=? UNION "
+            "SELECT 1 FROM discard_logs WHERE gsm_id=? AND message_id=? LIMIT 1",
+            (gsm_id, message_id, gsm_id, message_id, gsm_id, message_id),
+        ).fetchone()
+        return row is not None
 
     def digest_seen(self, gsm_id: str, run_key: str) -> bool:
         row = self.conn.execute(

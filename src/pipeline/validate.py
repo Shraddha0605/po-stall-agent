@@ -17,4 +17,7 @@ def validate_classification(message: Dict[str, object], po_map: Dict[str, Dict[s
     sender = message.get("sender")
     if sender and sender not in {po_map[po_ref].get("supplier_email"), po_map[po_ref].get("supplier")}: 
         return False, "sender_unknown"
+    evidence = message.get("evidence")
+    if evidence and evidence not in str(message.get("body", "")):
+        return False, "evidence_not_in_body"
     return True, "ok"
