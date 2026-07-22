@@ -3,7 +3,7 @@ import json
 import os
 import sys
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 from src.model.client import AnthropicClient
 from src.pipeline.classify import TRACK_DEFINITIONS, _normalize_classification
@@ -28,10 +28,10 @@ def compare_fields(label: Dict[str, Any], predicted: Dict[str, Any]) -> float:
     return correct / len(fields)
 
 
-def main() -> int:
+def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', default='tests/golden/messages.jsonl')
-    args = parser.parse_args()
+    args = parser.parse_args(argv)
     messages = load_messages(args.path)
     client = AnthropicClient(api_key=os.getenv('ANTHROPIC_API_KEY'))
     if not client.api_key:
