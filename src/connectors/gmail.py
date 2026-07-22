@@ -10,8 +10,19 @@ from google.auth.transport.requests import Request
 from google.oauth2.service_account import Credentials
 from google_auth_oauthlib.flow import InstalledAppFlow
 from googleapiclient.discovery import build
+from googleapiclient.errors import HttpError
+
+from src.util.backoff import retry_with_backoff
 
 SCOPES = ['https://www.googleapis.com/auth/gmail.readonly', 'https://www.googleapis.com/auth/gmail.compose']
+
+
+def _is_retryable_gmail_error(exc: Exception) -> bool:
+    return isinstance(exc, HttpError) and (exc.resp.status == 429 or exc.resp.status >= 500)
+
+
+def _execute_with_backoff(request):
+    return retry_with_backoff(request.execute, should_retry=_is_retryable_gmail_error)
 
 
 def _get_oauth_credentials(credentials_path: str, token_path: str) -> Credentials:
@@ -89,12 +100,12 @@ class GmailConnector:
         page_token: Optional[str] = None
         remaining = max_results
         while True:
-            response = service.users().messages().list(
+            response = _execute_with_backoff(service.users().messages().list(
                 userId=user_id,
                 q=query,
                 maxResults=min(remaining, 100),
                 pageToken=page_token,
-            ).execute()
+            ))
             collected.extend(response.get('messages', []))
             if not response.get('nextPageToken') or len(collected) >= max_results:
                 break
@@ -107,7 +118,7 @@ class GmailConnector:
             return {'id': message_id, 'subject': '', 'from': '', 'body': '', 'threadId': message_id, 'internalDate': '0'}
         user_id = user_id or self.user_id
         service = self._service_for_user(user_id)
-        message = service.users().messages().get(userId=user_id, id=message_id, format='full').execute()
+        message = _execute_with_backoff(service.users().messages().get(userId=user_id, id=message_id, format='full'))
         headers = {header['name']: header['value'] for header in message.get('payload', {}).get('headers', [])}
         body = _parse_body(message.get('payload', {}))
         sender_email = parseaddr(headers.get('From', ''))[1] or headers.get('From', '')
@@ -145,5 +156,5 @@ class GmailConnector:
         if thread_id:
             draft_message['threadId'] = thread_id
         draft_body = {'message': draft_message}
-        draft = service.users().drafts().create(userId=user_id, body=draft_body).execute()
+        draft = _execute_with_backoff(service.users().drafts().create(userId=user_id, body=draft_body))
         return draft
