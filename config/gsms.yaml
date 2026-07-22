@@ -1,9 +1,9 @@
 gsms:
   - id: gsm1
-    email: gsm1@company.example
+    email: gsm1@example.com
     slack_channel: "#po-digest-gsm1"
     po_seed_file: data/seed_pos_gsm1.csv
   - id: gsm2
-    email: gsm2@company.example
+    email: gsm2@example.com
     slack_channel: "#po-digest-gsm2"
     po_seed_file: data/seed_pos_gsm2.csv

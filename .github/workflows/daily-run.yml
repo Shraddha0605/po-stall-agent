@@ -8,14 +8,21 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    if: ${{ secrets.ANTHROPIC_API_KEY != '' && secrets.SLACK_BOT_TOKEN != '' }}
+    if: ${{ secrets.SLACK_BOT_TOKEN != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' && secrets.GMAIL_IMPERSONATE_EMAIL != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
-      - run: pip install -r requirements.txt
+      - run: python -m pip install -r requirements.txt
+      - name: Write service account credentials
+        run: |
+          mkdir -p ${{ github.workspace }}/secrets
+          echo "$GOOGLE_SERVICE_ACCOUNT_JSON" > ${{ github.workspace }}/secrets/service-account.json
       - run: python -m src.run --once
         env:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
           SLACK_BOT_TOKEN: ${{ secrets.SLACK_BOT_TOKEN }}
+          GMAIL_AUTH_MODE: service
+          GOOGLE_SERVICE_ACCOUNT_FILE: ${{ github.workspace }}/secrets/service-account.json
+          GMAIL_IMPERSONATE_EMAIL: ${{ secrets.GMAIL_IMPERSONATE_EMAIL }}

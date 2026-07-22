@@ -1,44 +1,59 @@
 # PO Stall Detection & Resolution Agent
 
-This repository provides a starter implementation of the PO stall detection workflow described in the project spec. It reads configured PO seed data, runs the deterministic prefilter/validation/reconciliation steps, and exposes CLI entrypoints for dry runs and evaluation.
+This project is a proof of concept that reads GSM mailboxes, detects stalled purchase orders, posts a structured digest to Slack, and creates Gmail reply drafts for follow-up.
 
-## Safety model
+## Problem
+Finance and sourcing teams know a PO is delayed, but the ERP only shows the stage. The missing piece is the cause and next owner, which usually lives in email and chat.
 
-The system is intentionally write-safe. It never sends email and never writes to the ERP; it only produces structured output and draft-ready artifacts in the scaffolded connectors.
+## Solution
+This repository provides a pipeline that:
+- reads each GSM mailbox,
+- identifies PO-related messages,
+- links messages to seeded PO data,
+- ranks stalled items by urgency,
+- posts a digest to Slack,
+- creates Gmail drafts for the next action.
 
-## Setup order for the human
+## How it works
+- `src/run.py` runs the end-to-end pipeline.
+- `config/gsms.yaml` defines each GSM and channel.
+- `config/settings.yaml` controls the PO pattern and ages.
+- `src/connectors` contains Gmail and Slack integration.
+- `src/pipeline` implements deterministic filtering, aging, diagnosis, and reconciliation.
 
-1. Install Python 3.11+ and the project requirements.
-2. Copy .env.example to .env and add your Anthropic and Slack credentials.
-3. Review config/settings.yaml, config/gsms.yaml, and config/taxonomy.yaml.
-4. Run the dry-run entrypoint to confirm the workflow without writing anything.
-5. When ready, run the once entrypoint against your real connectors.
-
-## Quick start
+## Setup
+1. Install Python 3.11+.
+2. Copy `.env.example` to `.env`.
+3. Fill in your own Slack token and Gmail credential paths.
+4. Review `config/*.yaml` for your GSMs and taxonomy.
+5. Run:
 
 ```bash
 python3 -m pip install -r requirements.txt
-python3 -m src.run --dry-run
-python3 -m src.eval
+python3 -m src.run --dry-run --gsm gsm1
 ```
 
-## Project layout
-
-- src/run.py: CLI entrypoint
-- src/pipeline: deterministic prefilter, validation, ageing, diagnosis, reconciliation
-- src/connectors: Gmail and Slack connectors
-- src/model: Anthropic wrapper scaffold
-- src/store: SQLite-backed store with checkpoints and state rows
-- tests: automated coverage for the deterministic workflow
-
-## Scheduling
-
-A simple cron example:
+6. If the dry run looks correct, run:
 
 ```bash
-0 7 * * * cd /path/to/repo && python3 -m src.run --once
+python3 -m src.run --once --gsm gsm1
 ```
 
-## Notes
+## GitHub Actions
+The workflow in `.github/workflows/daily-run.yml` only runs when required secrets are configured in GitHub.
 
-This scaffold is designed to be extended into the full enterprise workflow from the specification. The current implementation focuses on deterministic logic, tests, and a runnable dry-run/evaluation path.
+## Docs
+See `docs/Discovery.md` and `docs/PRD.md` for the project assumptions, system logic, and proof-of-concept design.
+
+## Important
+- Do not commit `.env` or any credential files.
+- The repo is public-ready and uses environment variables for all secrets.
+- Configure GitHub secrets for Slack and Gmail before enabling the scheduled workflow.
+- This is a proof of concept; a real deployment should add stronger production validation and monitoring.
+
+## Structure
+- `src/`: application code
+- `config/`: runtime settings and GSM definitions
+- `data/`: sample PO seed files
+- `tests/`: unit tests
+- `docs/`: PRD and discovery notes
