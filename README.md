@@ -3,187 +3,182 @@ PO Stall Agent
 
 [![CI](https://github.com/Shraddha0605/po-stall-agent/actions/workflows/daily-run.yml/badge.svg)](https://github.com/Shraddha0605/po-stall-agent/actions/workflows/daily-run.yml) [![Release](https://img.shields.io/github/v/release/Shraddha0605/po-stall-agent?label=release&sort=semver)](https://github.com/Shraddha0605/po-stall-agent/releases)
 
+A daily agent for Global Sourcing Managers (GSMs): it reads each GSM's Gmail mailbox, works out
+which purchase orders are stuck and why, posts a ranked digest to Slack, and drafts the reply
+emails a human reviews and sends.
+
 What it does
 ------------
-- Reads each configured Global Sourcing Manager's (GSM) Gmail mailbox, detects stalled POs, and produces a daily digest per GSM in Slack plus draft reply emails in that GSM's Gmail Drafts. A human reviews and sends everything.
+The ERP shows the *stage* of a PO but never the *cause* or the *owner* — that lives in email. This
+system reconstructs each PO's state from the mailbox, detects stalls, and hands each GSM a morning
+Slack digest plus ready-to-send Gmail draft replies. It's built to serve up to ~10 GSMs sharing one
+Slack workspace, each with their own mailbox, PO list, channel, and drafts.
 
 Safety model (important)
 -----------------------
-- Never sends email programmatically. The code uses `users.drafts.create` only; no path calls `users.messages.send`.
-- Never writes to the ERP. All outputs are drafts and Slack posts for human action.
-- Two LLM calls only: one for message classification+field extraction (MODEL CALL 1) and one for composing the digest + reply drafts (MODEL CALL 2). All other steps are deterministic code.
+- **Never sends email.** The code only ever calls `users.drafts.create`; no path calls
+  `users.messages.send` (enforced by `tests/test_no_send.py`, a static check over `src/`).
+- **Never writes to the ERP.** All outputs are Gmail drafts and Slack posts for a human to act on.
+- **Two LLM calls only.** One call classifies a message onto a track and extracts fields (MODEL CALL
+  1); one call composes the digest and draft replies (MODEL CALL 2). Every other step — pre-filter,
+  validation, aging, diagnosis, reconciliation — is deterministic code.
 
-Quick start
------------
-Prerequisites: Python 3.11+, git, network access for optional model calls.
+How it works (the 10-step pipeline)
+-----------------------------------
+1. **Ingest** — paginated Gmail reads since the GSM's last checkpoint (14-day lookback on first run).
+2. **Pre-filter** — deterministic keep/discard by PO pattern, sender allowlist, or thread link.
+3. **Classify** — MODEL CALL 1 (`src/pipeline/classify.py`): one JSON-only response per message with
+   `po_ref`, `track`, `evidence`, `confidence`, etc. No verbatim quote, no field.
+4. **Validate** — deterministic gate (`src/pipeline/validate.py`): rejects unknown POs, amount
+   mismatches, evidence not found in the new message body, and duplicate `message_id`s.
+5. **State** — append-only rows in the shared DB, namespaced by `gsm_id` (`src/store/db.py`).
+6. **Age** — working-day idle time per track vs. the configured threshold.
+7. **Diagnose** — deterministic taxonomy lookup to `{cause, owner, next_action}`.
+8. **Compose** — MODEL CALL 2 (`src/pipeline/compose.py`): writes the Slack digest and per-PO reply
+   drafts using only the facts in the state rows.
+9. **Deliver** — posts a Block Kit message to the GSM's Slack channel and creates Gmail drafts.
+10. **Reconcile** — asserts `ingested == passed + discarded` and `passed == state_updated +
+    review_items` per GSM; a mismatch banners that GSM's digest and fails the run.
 
-1. Install runtime deps:
+See `docs/architecture.md` for more detail.
+
+Setup
+-----
+Prerequisites: Python 3.11+.
 
 ```bash
 python3 -m pip install -r requirements.txt
 ```
 
-2. Configure (see `config/`):
-- `config/settings.yaml` – pattern, thresholds, model name, confidence threshold.
-- `config/gsms.yaml` – list of GSMs (id, email, slack_channel, po_seed_file).
-- `config/taxonomy.yaml` – diagnostic taxonomy mapping tracks → cause/owner/next_action.
+Credentials (none are committed — copy `.env.example` to `.env` and fill in your own):
+- `ANTHROPIC_API_KEY` — required for classification/compose; both steps skip cleanly without it.
+- Gmail — either:
+  - **Service account (recommended for a team):** create a service account in Google Cloud, enable
+    domain-wide delegation, authorize the `gmail.readonly` and `gmail.compose` scopes for it in the
+    Workspace admin console, download the JSON key, and set `GOOGLE_SERVICE_ACCOUNT_FILE` +
+    `GMAIL_AUTH_MODE=service`. The agent impersonates each GSM's `email` from `config/gsms.yaml` —
+    no per-user consent, safe to run unattended on a schedule.
+  - **OAuth fallback (single personal mailbox, for demos):** create an OAuth client, download
+    `credentials.json`, set `GMAIL_AUTH_MODE=oauth`, `GMAIL_OAUTH_CREDENTIALS`, and
+    `GMAIL_OAUTH_TOKEN` (path to write/read `token.json`). First run opens a browser consent flow.
+- Slack — create a bot token with the `chat:write` scope, set `SLACK_BOT_TOKEN`, and put each GSM's
+  channel id in `config/gsms.yaml`.
 
-3. Credentials (no secrets in repo):
-- `ANTHROPIC_API_KEY` (optional — required to run eval and live model calls).
-- Gmail: `GOOGLE_SERVICE_ACCOUNT_FILE` for service-account + domain-wide delegation, or OAuth fallback (`credentials.json` / `token.json`).
-- `SLACK_BOT_TOKEN` for Slack posting.
+Config:
+- `config/settings.yaml` — PO pattern, idle threshold, model, confidence threshold.
+- `config/gsms.yaml` — the list of GSMs: id, email, Slack channel, PO seed file.
+- `config/taxonomy.yaml` — stall causes/owners/next actions per track.
 
-Run (dry-run first)
--------------------
-Dry-run prints the digest and drafts without writing to Slack or creating drafts:
+Run
+---
+Dry-run first — prints the digest and drafts it *would* produce, writes nothing to Slack, Gmail, or
+the state DB:
 
 ```bash
 python -m src.run --once --dry-run
 ```
 
-Run a single GSM (dry-run):
+Single GSM:
 
 ```bash
 python -m src.run --gsm gsm1 --dry-run
 ```
 
-Run one full cycle (writes drafts and posts to Slack):
+Full cycle (posts to Slack, creates Gmail drafts, advances checkpoints):
 
 ```bash
 python -m src.run --once
 ```
 
+To sanity-check the pipeline wiring before any credentials are set up at all, set
+`GMAIL_AUTH_MODE=fixture` — this skips Gmail/Anthropic/Slack entirely and dry-runs an empty cycle for
+every configured GSM, so you can confirm the install and config are wired correctly first.
+
 Evaluation harness
 ------------------
-Run the golden-set eval (uses `ANTHROPIC_API_KEY` if present; skips cleanly without it):
-
 ```bash
 python -m src.eval
 ```
+Runs MODEL CALL 1 over the labelled messages in `tests/golden/messages.jsonl` and prints track
+accuracy, field accuracy, and fabricated-PO count. Gate: ≥95% track, ≥95% field, zero fabricated POs.
+Skips cleanly (exit 0) if `ANTHROPIC_API_KEY` isn't set.
 
 Testing
 -------
-Run the unit tests locally:
-
 ```bash
 python3 -m pytest -q
 ```
+All tests are deterministic and run with no network access, including `test_no_send` (static check:
+no send scope, no `messages.send` anywhere in `src/`), `test_idempotency`, and `test_multi_gsm`.
 
-Configuration notes
--------------------
-- `po_pattern` (regex) in `config/settings.yaml` defaults to `PO-\d{5}`.
-- `idle_threshold_working_days` controls when a track becomes `critical`.
-- `lookback_days_first_run` controls initial mailbox lookback.
-
-How it works (the 10-step pipeline)
------------------------------------
-1. Ingest — paginated Gmail reads since the last checkpoint (14-day first-run lookback).
-2. Pre-filter — deterministic keep/discard by PO pattern, allowlist, or thread link.
-3. Classify — MODEL CALL 1: one JSON-only response per message with `po_ref`, `track`, `evidence`, `confidence`, etc.
-4. Validate — deterministic gate; rejects messages that fail hard checks (unknown PO, amount mismatch, no evidence in new body, duplicate message_id).
-5. State — append-only rows in the shared DB namespaced by `gsm_id`.
-6. Age — compute working-day idle time per track vs threshold.
-7. Diagnose — deterministic taxonomy lookup to map stalled tracks to `{cause, owner, next_action}`.
-8. Compose — MODEL CALL 2: create the Slack digest text and per-PO reply drafts (only using facts from state rows).
-9. Deliver — post Block Kit Slack message to the GSM channel and create Gmail drafts (`users.drafts.create`). Backoff + pagination applied to connectors.
-10. Reconcile — assert counts: `ingested == passed + discarded` and `passed == state_updated + routed_to_review` per GSM; failures banner the Slack digest and exit non-zero for that GSM.
-
-Robustness and production concerns
-----------------------------------
-- Idempotency: dedupe on `message_id`; track produced drafts/digests per run so repeated runs don't duplicate.
-- Isolation: one GSM's failure doesn't abort others; per-GSM checkpoints ensure resumed runs are safe.
-- Backoff & pagination: all Gmail and Slack calls use exponential backoff for 429/5xx.
-- Logging: structured per-run, per-GSM logs written to rotating files.
-- `--dry-run` mode avoids any external writes.
-
-Developer notes
----------------
-- Core modules: `src/run.py` (orchestrator), `src/model/client.py` (Anthropic wrapper), `src/connectors/gmail.py`, `src/connectors/slack.py`, `src/store/db.py`, `src/pipeline/*` (pipeline steps).
-- Tests: `tests/` contains unit tests and the golden set for classifier evaluation.
-- The repo includes `config/` seed files and `data/` sample PO CSVs for demo GSMs.
-
-Scheduling
-----------
-Cron example (run daily at 07:00 UTC):
+Schedule it
+-----------
+Cron, daily at 07:00 UTC:
 
 ```cron
 0 7 * * * cd /path/to/po-stall-agent && . /path/to/venv/bin/activate && python -m src.run --once
 ```
 
-GitHub Actions
---------------
-- A workflow `/.github/workflows/daily-run.yml` is included. It is guarded to no-op unless secrets are set in the repository settings.
+Or use `.github/workflows/daily-run.yml`, included in this repo. It runs on a schedule using
+repository secrets and no-ops if those secrets aren't configured, so a fork won't fail CI.
+
+Adapt for your team
+--------------------
+- Add a GSM: append an entry to `config/gsms.yaml` (id, email, Slack channel, PO seed file) and a
+  matching CSV under `data/`. No code changes needed.
+- Seed each GSM's PO list from your real PO tracker/ERP export instead of the sample CSVs.
+- Point `slack_channel` at your team's real channels and set the bot token's scope accordingly.
+- Tune `config/settings.yaml` (idle threshold, PO pattern, model) and `config/taxonomy.yaml`
+  (add causes/owners specific to your procurement process).
+- The included SQLite store (`src/store/db.py`) is sized for ~10 GSMs sharing one deployment; a
+  larger rollout should move it to a managed Postgres/Cloud SQL instance behind the same `Store`
+  interface.
+
+Configuration reference
+------------------------
+- `config/settings.yaml`: `po_pattern` (regex, default `PO-\d{5}`), `idle_threshold_working_days`
+  (default 4 — days idle before a track is `critical`), `lookback_days_first_run` (default 14),
+  `model` (Anthropic model id), `confidence_threshold` (default 0.7 — below this, no draft is
+  created and the digest names the department to follow up instead).
+- `config/gsms.yaml`: `id`, `email`, `slack_channel`, `po_seed_file` per GSM.
+- `config/taxonomy.yaml`: per-track rules mapping a stall to `{cause, owner, next_action}`.
 
 What's deliberately not built
-----------------------------
-- No automatic `messages.send` or any ERP-write integration.
-- No GUI review queue (messages routed to review are logged and surfaced in digests).
+------------------------------
+- Auto-send of any email, or any write path into the ERP.
+- A review-queue UI — items routed to review are logged and surfaced in the Slack digest.
+- Intra-day runs — this is a once-a-day batch by design.
 
-Where to look next
-------------------
-- Read the pipeline orchestrator: `src/run.py`.
-- Model prompts and parsing: `src/model/client.py`.
-- Eval harness: `src/eval.py` and `tests/golden/messages.jsonl`.
+Docs
+----
+- `docs/architecture.md` — pipeline and data-model detail.
+- `docs/Discovery.md`, `docs/PRD.md` — the discovery notes and product requirements this was built
+  from. The original source documents (`Discovery.pdf`/`.docx`, `PRD - PO Stall Detection.docx`,
+  `AI Evaluation Plan.docx`) are kept at the repo root for reference.
+
+Project layout
+--------------
+```
+po-stall-agent/
+├── README.md
+├── LICENSE
+├── .env.example
+├── requirements.txt
+├── .github/workflows/daily-run.yml
+├── config/                  # settings.yaml, gsms.yaml, taxonomy.yaml
+├── data/                    # seed PO CSVs per GSM
+├── src/
+│   ├── run.py                # entrypoint: iterate GSMs, run the 10 steps, exit code
+│   ├── eval.py                # golden-set eval harness
+│   ├── connectors/            # gmail.py, slack.py — read + draft, never send
+│   ├── pipeline/               # prefilter, classify, validate, age, diagnose, compose, reconcile
+│   ├── model/client.py          # Anthropic wrapper (both model calls)
+│   ├── store/db.py              # schema, checkpoints, state — namespaced by gsm_id
+│   └── util/                    # logging, dates, backoff
+├── tests/                     # unit tests + golden classification set
+└── docs/                      # architecture, discovery, PRD
+```
 
 License
 -------
 MIT — see LICENSE.
-# PO Stall Detection & Resolution Agent
-
-This project is a proof of concept that reads GSM mailboxes, detects stalled purchase orders, posts a structured digest to Slack, and creates Gmail reply drafts for follow-up.
-
-## Problem
-Finance and sourcing teams know a PO is delayed, but the ERP only shows the stage. The missing piece is the cause and next owner, which usually lives in email and chat.
-
-## Solution
-This repository provides a pipeline that:
-- reads each GSM mailbox,
-- identifies PO-related messages,
-- links messages to seeded PO data,
-- ranks stalled items by urgency,
-- posts a digest to Slack,
-- creates Gmail drafts for the next action.
-
-## How it works
-- `src/run.py` runs the end-to-end pipeline.
-- `config/gsms.yaml` defines each GSM and channel.
-- `config/settings.yaml` controls the PO pattern and ages.
-- `src/connectors` contains Gmail and Slack integration.
-- `src/pipeline` implements deterministic filtering, aging, diagnosis, and reconciliation.
-
-## Setup
-1. Install Python 3.11+.
-2. Copy `.env.example` to `.env`.
-3. Fill in your own Slack token and Gmail credential paths.
-4. Review `config/*.yaml` for your GSMs and taxonomy.
-5. Run:
-
-```bash
-python3 -m pip install -r requirements.txt
-python3 -m src.run --dry-run --gsm gsm1
-```
-
-6. If the dry run looks correct, run:
-
-```bash
-python3 -m src.run --once --gsm gsm1
-```
-
-## GitHub Actions
-The workflow in `.github/workflows/daily-run.yml` only runs when required secrets are configured in GitHub.
-
-## Docs
-See `docs/Discovery.md` and `docs/PRD.md` for the project assumptions, system logic, and proof-of-concept design.
-
-## Important
-- Do not commit `.env` or any credential files.
-- The repo is public-ready and uses environment variables for all secrets.
-- Configure GitHub secrets for Slack and Gmail before enabling the scheduled workflow.
-- This is a proof of concept; a real deployment should add stronger production validation and monitoring.
-
-## Structure
-- `src/`: application code
-- `config/`: runtime settings and GSM definitions
-- `data/`: sample PO seed files
-- `tests/`: unit tests
-- `docs/`: PRD and discovery notes
