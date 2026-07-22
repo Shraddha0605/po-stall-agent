@@ -3,6 +3,7 @@ from __future__ import annotations
 import base64
 import email
 import os
+from email.utils import parseaddr
 from typing import Any, Dict, List, Optional
 
 from google.auth.transport.requests import Request
@@ -109,11 +110,12 @@ class GmailConnector:
         message = service.users().messages().get(userId=user_id, id=message_id, format='full').execute()
         headers = {header['name']: header['value'] for header in message.get('payload', {}).get('headers', [])}
         body = _parse_body(message.get('payload', {}))
+        sender_email = parseaddr(headers.get('From', ''))[1] or headers.get('From', '')
         return {
             'id': message.get('id'),
             'threadId': message.get('threadId'),
             'subject': headers.get('Subject', ''),
-            'from': headers.get('From', ''),
+            'from': sender_email,
             'body': body,
             'internalDate': message.get('internalDate', '0'),
         }

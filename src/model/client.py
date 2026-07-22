@@ -3,11 +3,9 @@ import json
 from typing import Any, Dict, List, Optional
 
 try:
-    from anthropic import Anthropic, HUMAN_PROMPT, AI_PROMPT
+    from anthropic import Anthropic
 except ImportError:  # pragma: no cover
     Anthropic = None
-    HUMAN_PROMPT = ""
-    AI_PROMPT = ""
 
 
 def _parse_json_response(text: str) -> Any:
@@ -64,7 +62,7 @@ class AnthropicClient:
         prompt = (
             "You are composing a PO stall digest and draft replies from structured, audited state rows. "
             "Use only the facts given in the rows and do not invent any new PO details. "
-            "Output exactly one JSON object with fields: digest_text and drafts. "
+            "Output exactly one JSON object with fields: digest and drafts. "
             "Drafts must be a list of objects with po_ref, subject, and body. "
             "The digest_text should group items by urgency and mention the reason and next action. "
             "Do not include any extra text outside the JSON object.\n\n"
@@ -76,14 +74,13 @@ class AnthropicClient:
     def _call_model(self, prompt: str) -> str:
         if not self.client:
             raise RuntimeError("Anthropic client is not available")
-        response = self.client.completions.create(
+        response = self.client.messages.create(
             model=self.model,
-            prompt=HUMAN_PROMPT + prompt + AI_PROMPT,
             max_tokens=1024,
             temperature=0.0,
-            stop=[AI_PROMPT],
+            messages=[{"role": "user", "content": prompt}],
         )
-        return response.completion or response.get("completion", "")
+        return "".join(block.text for block in response.content if block.type == "text")
 
     def classify_message(self, message: Dict[str, Any], candidate_pos: List[Dict[str, Any]], track_definitions: List[Dict[str, Any]]) -> Dict[str, Any]:
         if not self.api_key or not self.client:
