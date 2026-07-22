@@ -8,12 +8,17 @@ on:
 jobs:
   run:
     runs-on: ubuntu-latest
-    if: ${{ secrets.SLACK_BOT_TOKEN != '' && secrets.GOOGLE_SERVICE_ACCOUNT_JSON != '' && secrets.GMAIL_IMPERSONATE_EMAIL != '' }}
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.11'
+      - name: Validate required secrets
+        run: |
+          if [ -z "${{ secrets.SLACK_BOT_TOKEN }}" ] || [ -z "${{ secrets.GOOGLE_SERVICE_ACCOUNT_JSON }}" ] || [ -z "${{ secrets.GMAIL_IMPERSONATE_EMAIL }}" ]; then
+            echo "Required secrets are missing. Set SLACK_BOT_TOKEN, GOOGLE_SERVICE_ACCOUNT_JSON, and GMAIL_IMPERSONATE_EMAIL."
+            exit 1
+          fi
       - run: python -m pip install -r requirements.txt
       - name: Write service account credentials
         run: |
