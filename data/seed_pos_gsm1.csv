@@ -1,0 +1,9 @@
+po_ref,supplier,supplier_email,amount,stage,opened
+PO-10234,Acme Motors,orders@acme-motors.example,48200,Finance approval,2026-07-10
+PO-10356,Vertex Polymers,sales@vertex-poly.example,15750,Quote revision,2026-07-14
+PO-10412,Base Metals,quotes@base-metals.example,9300,In production,2026-07-05
+PO-10455,Kern Cable,ap@kern-cable.example,22100,Invoice with AP,2026-07-08
+PO-10478,Nordic Fasteners,hello@nordic-fast.example,6400,PO issued,2026-07-16
+PO-10502,Meridian Tooling,sales@meridian-tool.example,31800,PO issued,2026-07-12
+PO-10531,Halden Rubber,orders@halden-rubber.example,4750,Goods receipt,2026-07-03
+PO-10566,Pallas Steel,quotes@pallas-steel.example,58900,Finance approval,2026-07-11

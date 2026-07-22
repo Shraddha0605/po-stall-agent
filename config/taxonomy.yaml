@@ -1,0 +1,13 @@
+approval:
+  approver_idle: {cause: "Approver has not actioned it", owner: "Approver", next_action: "Nudge the approver in-thread"}
+  over_limit: {cause: "Amount exceeds approver's limit", owner: "Next-level approver", next_action: "Escalate to the next approver"}
+  budget_blocked: {cause: "Budget not released / cost centre", owner: "Requester, Finance", next_action: "Ask requester to fix cost centre"}
+supplier:
+  no_ack: {cause: "Supplier has not acknowledged PO", owner: "Supplier", next_action: "Chase acknowledgement in-thread"}
+  onboarding: {cause: "Vendor onboarding incomplete", owner: "Supplier, AP", next_action: "Chase missing tax/banking/cert docs"}
+finance:
+  gr_missing: {cause: "Goods receipt not posted", owner: "Warehouse", next_action: "Ask warehouse to post GR"}
+  payment_overdue: {cause: "Payment past agreed terms", owner: "AP", next_action: "Escalate payment to AP"}
+commercial:
+  quote_pending: {cause: "Revised quote awaiting review", owner: "GSM", next_action: "Review and confirm the quote"}
+  price_mismatch: {cause: "PO price does not match quote", owner: "GSM", next_action: "Reconcile the price with the supplier"}

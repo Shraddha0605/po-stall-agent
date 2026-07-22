@@ -1,0 +1,5 @@
+po_ref,supplier,supplier_email,amount,stage,opened
+PO-20011,Northwind Parts,sales@northwind.example,12800,PO issued,2026-07-13
+PO-20012,Blue Harbor,orders@blueharbor.example,5400,Supplier acknowledgement,2026-07-15
+PO-20013,Greenline Labs,ap@greenline.example,9600,Finance approval,2026-07-09
+PO-20014,Harbor Tek,quotes@harbortek.example,17400,Quote revision,2026-07-06
