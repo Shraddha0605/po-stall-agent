@@ -3,15 +3,16 @@ from typing import Any, Dict, List
 from src.model.client import AnthropicClient
 
 TRACK_DEFINITIONS = [
-    {"track": "approval", "description": "Approval stage or approver action required."},
-    {"track": "supplier", "description": "Supplier acknowledgement, onboarding, or delivery issue."},
-    {"track": "finance", "description": "Finance, AP, payment, or goods receipt issue."},
-    {"track": "commercial", "description": "Quote, price, or commercial review issue."},
+    {"track": "approval", "description": "Approval stage or approver action required.", "blockers": ["approver_idle", "over_limit", "budget_blocked"]},
+    {"track": "supplier", "description": "Supplier acknowledgement, onboarding, or delivery issue.", "blockers": ["no_ack", "onboarding"]},
+    {"track": "finance", "description": "Finance, AP, payment, or goods receipt issue.", "blockers": ["gr_missing", "payment_overdue"]},
+    {"track": "commercial", "description": "Quote, price, or commercial review issue.", "blockers": ["quote_pending", "price_mismatch"]},
 ]
 
 REQUIRED_FIELDS = [
     "po_ref",
     "track",
+    "blocker",
     "status_signal",
     "date",
     "amount",

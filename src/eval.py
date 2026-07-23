@@ -15,17 +15,16 @@ def load_messages(path: str) -> List[Dict[str, Any]]:
 
 
 def build_candidate_pos(messages: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    refs = {message['po_ref'] for message in messages if message.get('po_ref') != 'PO-99999'}
+    refs = {message['label']['po_ref'] for message in messages if message['label'].get('po_ref') != 'PO-99999'}
     return [{ 'po_ref': po_ref, 'supplier': 'unknown', 'amount': None } for po_ref in sorted(refs)]
 
 
-def compare_fields(label: Dict[str, Any], predicted: Dict[str, Any]) -> float:
-    fields = ['track', 'status_signal', 'date', 'amount', 'parties', 'evidence']
-    correct = 0
-    for field in fields:
-        if label.get(field) == predicted.get(field):
-            correct += 1
-    return correct / len(fields)
+def compare_fields(label: Dict[str, Any], predicted: Dict[str, Any], body: str) -> float:
+    fields = ['track', 'blocker', 'date', 'amount', 'parties']
+    correct = sum(1 for field in fields if label.get(field) == predicted.get(field))
+    evidence = predicted.get('evidence') or ''
+    correct += 1 if evidence and evidence in body else 0
+    return correct / (len(fields) + 1)
 
 
 def main(argv: Optional[List[str]] = None) -> int:
@@ -45,20 +44,22 @@ def main(argv: Optional[List[str]] = None) -> int:
     fabricated = 0
 
     for message in messages:
+        label = message['label']
+        body = message.get('body', '')
         prompt_message = {
             'id': message['id'],
             'threadId': None,
-            'subject': message.get('status_signal', ''),
+            'subject': 'PO status update',
             'sender': message.get('sender', ''),
-            'body': message.get('status_signal', ''),
+            'body': body,
         }
         predicted = client.classify_message(prompt_message, candidate_pos, TRACK_DEFINITIONS)
         normalized = _normalize_classification(predicted)
-        if normalized.get('track') == message.get('track'):
+        if normalized.get('track') == label.get('track'):
             track_matches += 1
         if normalized.get('po_ref') not in {pos['po_ref'] for pos in candidate_pos}:
             fabricated += 1
-        field_matches += compare_fields(message, normalized)
+        field_matches += compare_fields(label, normalized, body)
 
     track_accuracy = track_matches / total * 100.0
     field_accuracy = field_matches / total * 100.0
