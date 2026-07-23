@@ -27,6 +27,16 @@ def compare_fields(label: Dict[str, Any], predicted: Dict[str, Any], body: str) 
     return correct / (len(fields) + 1)
 
 
+def is_fabricated(predicted_ref: Optional[str], known_refs: set, label_ref: Optional[str]) -> bool:
+    if not predicted_ref:
+        return False
+    if predicted_ref in known_refs:
+        return False
+    if predicted_ref == label_ref:
+        return False
+    return True
+
+
 def main(argv: Optional[List[str]] = None) -> int:
     parser = argparse.ArgumentParser()
     parser.add_argument('--path', default='tests/golden/messages.jsonl')
@@ -38,6 +48,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         return 0
 
     candidate_pos = build_candidate_pos(messages)
+    known_refs = {pos['po_ref'] for pos in candidate_pos}
     total = len(messages)
     track_matches = 0
     field_matches = 0.0
@@ -57,7 +68,7 @@ def main(argv: Optional[List[str]] = None) -> int:
         normalized = _normalize_classification(predicted)
         if normalized.get('track') == label.get('track'):
             track_matches += 1
-        if normalized.get('po_ref') not in {pos['po_ref'] for pos in candidate_pos}:
+        if is_fabricated(normalized.get('po_ref'), known_refs, label.get('po_ref')):
             fabricated += 1
         field_matches += compare_fields(label, normalized, body)
 
