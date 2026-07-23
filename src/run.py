@@ -190,7 +190,7 @@ def run_gsm(
 
     reconciliation = reconcile_counts(
         len(messages),
-        len(processed),
+        len(keep),
         len(discarded),
         state_updated,
         review_items,
