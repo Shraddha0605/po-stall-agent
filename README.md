@@ -23,22 +23,45 @@ Safety model (important)
   1); one call composes the digest and draft replies (MODEL CALL 2). Every other step — pre-filter,
   validation, aging, diagnosis, reconciliation — is deterministic code.
 
+Demo scope
+----------
+This is a working demo built to accompany a product submission, not a production deployment. What's
+deliberately simplified:
+
+- **Golden set** is 20 illustrative messages, including adversarial cases (prompt-injection attempts,
+  quoted-history traps, near-duplicate PO refs), not a full pilot-scale certification set.
+- **Quoted-history stripping** isn't implemented. Validation checks that the evidence span appears
+  somewhere in the message body, but the body includes quoted reply history verbatim — nothing strips
+  it first. A span lifted from the quoted portion below the new message still passes. Evidence should
+  come from the new message only, not the quote; the code doesn't enforce that distinction yet.
+- **Sender validation** trusts the seeded supplier address on file for each PO. It has no notion of
+  internal senders (an approver, Finance, a warehouse contact) — a real deployment resolves senders
+  against the ERP's party records per PO instead.
+- **Store** is SQLite, sized for ~10 GSMs sharing one deployment. A larger rollout moves it to managed
+  Postgres/Cloud SQL behind the same `Store` interface.
+- **No review-queue UI** — items routed to review are logged and surfaced in the Slack digest.
+
 How it works (the 10-step pipeline)
 -----------------------------------
 1. **Ingest** — paginated Gmail reads since the GSM's last checkpoint (14-day lookback on first run).
 2. **Pre-filter** — deterministic keep/discard by PO pattern, sender allowlist, or thread link.
 3. **Classify** — MODEL CALL 1 (`src/pipeline/classify.py`): one JSON-only response per message with
-   `po_ref`, `track`, `evidence`, `confidence`, etc. No verbatim quote, no field.
+   `po_ref`, `track`, `blocker` (constrained to that track's taxonomy keys), `evidence`, `confidence`,
+   etc. No verbatim quote, no field.
 4. **Validate** — deterministic gate (`src/pipeline/validate.py`): rejects unknown POs, amount
-   mismatches, evidence not found in the new message body, and duplicate `message_id`s.
+   mismatches, evidence not found in the message body, and duplicate `message_id`s.
 5. **State** — append-only rows in the shared DB, namespaced by `gsm_id` (`src/store/db.py`).
 6. **Age** — working-day idle time per track vs. the configured threshold.
-7. **Diagnose** — deterministic taxonomy lookup to `{cause, owner, next_action}`.
+7. **Diagnose** — deterministic lookup, keyed by the `blocker` MODEL CALL 1 returned, to
+   `{cause, owner, next_action}` in `taxonomy.yaml`. An unknown or null blocker falls back to
+   `{cause: "inferred", owner: "unknown", next_action: "review"}` rather than guessing.
 8. **Compose** — MODEL CALL 2 (`src/pipeline/compose.py`): writes the Slack digest and per-PO reply
    drafts using only the facts in the state rows.
 9. **Deliver** — posts a Block Kit message to the GSM's Slack channel and creates Gmail drafts.
 10. **Reconcile** — asserts `ingested == passed + discarded` and `passed == state_updated +
-    review_items` per GSM; a mismatch banners that GSM's digest and fails the run.
+    review_items` per GSM, where `passed` means survived the pre-filter: every pre-filtered message
+    resolves to exactly one of `state_updated` (validated, written to state) or `review_items` (failed
+    validation or missing required data). A mismatch banners that GSM's digest and fails the run.
 
 See `docs/architecture.md` for more detail.
 
@@ -99,9 +122,19 @@ Evaluation harness
 ```bash
 python -m src.eval
 ```
-Runs MODEL CALL 1 over the labelled messages in `tests/golden/messages.jsonl` and prints track
-accuracy, field accuracy, and fabricated-PO count. Gate: ≥95% track, ≥95% field, zero fabricated POs.
-Skips cleanly (exit 0) if `ANTHROPIC_API_KEY` isn't set.
+Runs MODEL CALL 1 over 20 labelled messages in `tests/golden/messages.jsonl`. Each line carries a raw
+`body` — realistic multi-sentence prose with the signal buried mid-message — kept separate from a
+`label` object, so the model has to read the message rather than being handed its own answer back.
+Coverage: all four tracks, every taxonomy blocker key, two prompt-injection attempts, two
+quoted-history traps, two near-duplicate PO references, and one PO outside the candidate set.
+
+Scoring: `track`, `blocker`, `date`, `amount`, and `parties` are compared against the label; evidence
+is scored by groundedness — non-empty and verbatim in the body — not exact-matched against a label
+field. A prediction only counts as a fabricated PO if it's neither in the active PO set nor the
+label's own reference, so correctly naming the out-of-set PO doesn't get penalized as fabrication.
+
+Gate: ≥95% track, ≥95% field, zero fabricated POs. Skips cleanly (exit 0) if `ANTHROPIC_API_KEY`
+isn't set.
 
 Testing
 -------
