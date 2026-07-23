@@ -120,7 +120,7 @@ def run_gsm(
         last_transition = last_state.get((classification['po_ref'], classification['track']), {}).get('timestamp')
         now_iso = datetime.utcnow().isoformat() + 'Z'
         status = age_state(last_transition, now_iso, settings.get('idle_threshold_working_days', 4))
-        diagnosis = diagnose_track(classification['track'], taxonomy)
+        diagnosis = diagnose_track(classification['track'], taxonomy, key=classification.get('blocker'))
 
         row = {
             'gsm_id': gsm_id,
